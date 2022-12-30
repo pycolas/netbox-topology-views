@@ -8,18 +8,13 @@ from circuits.models import Circuit, CircuitTermination, ProviderNetwork
 from dcim.models import (
     Cable,
     CableTermination,
-    CabledObjectModel,
-    ConsolePort,
-    ConsoleServerPort,
     Device,
     device_components,
     DeviceRole,
     FrontPort,
     Interface,
     PowerFeed,
-    PowerOutlet,
     PowerPanel,
-    PowerPort,
     RearPort,
 )
 from django.conf import settings
@@ -34,7 +29,7 @@ from wireless.models import WirelessLink
 
 from netbox_topology_views.filters import DeviceFilterSet
 from netbox_topology_views.forms import DeviceFilterForm
-from netbox_topology_views.models import RoleImage
+from netbox_topology_views.models import RoleImage, Topology
 from netbox_topology_views.utils import (
     CONF_IMAGE_DIR,
     find_image_url,
@@ -42,9 +37,6 @@ from netbox_topology_views.utils import (
     get_model_slug,
     image_static_url,
 )
-
-from itertools import chain
-
 
 supported_termination_types = [
     "interface",
@@ -777,411 +769,68 @@ class TopologyImagesView(PermissionRequiredMixin, View):
         )
 
 
+def topology_to_visjs(cls, topology: Topology):
+    # Exporting nodes to json (visjs format)
+    result_nodes = []
 
-# Could inherit from django.model to store it in netbox database
-class BaseNode:
-    def __init__(self, id, name, netbox_instance):
-        self.id = id
-        self.name = name
-        self.netbox_instance = netbox_instance
-        self.display = True
-        self._links = [] # link can be a cable, circuit, ...
-    
-    def add_link(self, link):
-        self._links.append(link)
-
-    def has_links(self):
-        return len(self._links) > 0
-
-    def add_edge_infos(self, edge):
-        return edge
-    
-    def __str__(self):
-        if self.name == None:
-            return 'Unnamed'
-        else:
-            return self.name
-    
-    def export_visjs(self):
-        export = {
-            'id': self.id,
-            'label': str(self),
-            'name': str(self),
+    for node in topology.nodes().values():
+        visjs_node = {
+            'id': node.uid,
+            'label': str(node),
+            'name': str(node),
             'shape': 'image',
-            'image': '../../static/netbox_topology_views/img/role-unknown.png', # TODO
+            'image': get_image_for_entity(node.netbox_object),
             'physics': True
         }
 
-        if 'coordinates' in self.netbox_instance.custom_field_data:
-            coordinates = self.netbox_instance.custom_field_data['coordinates']
+        if 'coordinates' in node.netbox_object.custom_field_data:
+            coordinates = node.netbox_object.custom_field_data['coordinates']
             if coordinates:
                 if ";" in coordinates:
                     cords =  coordinates.split(";")
-                    export['x'] = int(cords[0])
-                    export['y'] = int(cords[1])
-                    export['physics'] = False
-
-        return export
-        
-
-class DeviceNode(BaseNode):
-
-    @classmethod
-    def make_id(cls, id):
-        return str(id)
-
-    def __init__(self, device):
-        super().__init__(self.make_id(device.id), device.name, device)
-        self.device = device
-
-    def export_visjs(self):
-        export = super().export_visjs()
-        export['image'] = get_image_for_entity(self.device)
-        return export
-
-
-class CircuitNode(BaseNode):
-
-    @classmethod
-    def make_id(cls, id):
-        return f'c{id}'
-
-    def __init__(self, circuit):
-        super().__init__(self.make_id(circuit.id), circuit.cid, circuit)
-        self.circuit = circuit
-    
-    def add_edge_infos(self, edge):
-        edge['title'] += f"<br/>Circuit provider: {self.circuit.provider}"
-        edge['dashes'] = True
-        return edge
-
-    def export_visjs(self):
-        export = super().export_visjs()
-        export['image'] = f"../../static/netbox_topology_views/img/circuit.png"
-        return export
-    
-    def __str__(self):
-        return f'Circuit {self.circuit.cid}'
-
-
-class ProviderNetworkNode(BaseNode):
-
-    @classmethod
-    def make_id(cls, id):
-        return f'pn{id}'
-
-    def __init__(self, provider_network):
-        super().__init__(self.make_id(provider_network.id), provider_network.name, provider_network)
-        self.provider_network = provider_network
-
-    def export_visjs(self):
-        export = super().export_visjs()
-        export['image'] = f"../../static/netbox_topology_views/img/circuit.png"
-        return export
-
-    def __str__(self):
-        return f'ProviderNetwork {self.name}'
-
-
-class PowerPanelNode(BaseNode):
-
-    @classmethod
-    def make_id(cls, id):
-        return f'p{id}'
-
-    def __init__(self, power_panel):
-        super().__init__(self.make_id(power_panel.id), power_panel.name, power_panel)
-        self.power_panel = power_panel
-
-    def export_visjs(self):
-        export = super().export_visjs()
-        export['image'] = f"../../static/netbox_topology_views/img/power-panel.png"
-        return export
-
-    def __str__(self):
-        return f'PowerPanel {self.name}'
-
-
-class PowerFeedNode(BaseNode):
-
-    @classmethod
-    def make_id(cls, id):
-        return f'f{id}'
-
-    def __init__(self, power_feed):
-        super().__init__(self.make_id(power_feed.id), power_feed.name, power_feed)
-        self.power_feed = power_feed
-
-    def export_visjs(self):
-        export = super().export_visjs()
-        export['image'] = f"../../static/netbox_topology_views/img/power-feed.png"
-        return export
-
-    def __str__(self):
-        return f'PowerFeed {self.name}'
-
-
-# Could inherit from django.model to store it in netbox database
-class Topology:
-
-    def __init__(self, show_circuit = True, show_power = False, show_unconnected = True, show_provider_network = True, save_coords = True):
-        self.show_circuit = show_circuit
-        self.show_power = show_power
-        self.show_unconnected = show_unconnected
-        self.show_provider_network = show_provider_network
-        self.save_coords = save_coords
-
-        self._device_ids = []
-        self._nodes = {}
-        self._edges = []
-        self._cables = {}
-        self._next_edge_id = 0
-        self._endpoint_ids = []
-
-    def get_topology_data(self, queryset):
-        self._device_ids = [d.id for d in queryset]
-
-        # Browse Pathendpoint
-        console_ports = ConsolePort.objects.filter(device_id__in=self._device_ids, cable__isnull=False).select_related('device')
-        console_srv_ports = ConsoleServerPort.objects.filter(device_id__in=self._device_ids, cable__isnull=False).select_related('device')
-        power_ports = PowerPort.objects.filter(device_id__in=self._device_ids, cable__isnull=False).select_related('device')
-        power_outlets = PowerOutlet.objects.filter(device_id__in=self._device_ids, cable__isnull=False).select_related('device')
-        interfaces = Interface.objects.filter(device_id__in=self._device_ids, cable__isnull=False).select_related('device')
-        path_endpoints = list(chain(console_ports, console_srv_ports, power_ports, power_outlets, interfaces))
-
-        for endpoint in path_endpoints:
-            self._browse_segments(endpoint.trace())
-
-        # Browse remaining endpoints (hop by hop)
-        rear_ports = RearPort.objects.filter(device_id__in=self._device_ids, cable__isnull=False).select_related('device')
-        front_ports = FrontPort.objects.filter(device_id__in=self._device_ids, cable__isnull=False).select_related('device')
-        endpoints = list(chain(rear_ports, front_ports))
-
-        for endpoint in endpoints:
-            segment = (endpoint.cable.a_terminations, [endpoint.cable], endpoint.cable.b_terminations)
-            self._browse_segments([segment])
-
-        # Wireless links
-        wlan_links = WirelessLink.objects.filter( Q(_interface_a_device_id__in=self._device_ids) & Q(_interface_b_device_id__in=self._device_ids))
-
-        for link in wlan_links:
-            segment = ([link.interface_a], [link], [link.interface_b])
-            self._browse_segments([segment])
-
-        # Create requested devices not discovered when browsing
-        if self.show_unconnected:
-            for device in queryset:
-                if device.id not in self._nodes:
-                    self._nodes[DeviceNode.make_id(device.id)] = DeviceNode(device)
-
-            if self.show_power:
-                # TODO same with PowerFeed and PowerPanel
-                # site_ids = [d.site.id for d in queryset]
-                # ...
-                pass
-                
-            if self.show_provider_network:
-                # TODO same with ProviderNetwork
-                # site_ids = [d.site.id for d in queryset]
-                # ...
-                pass
-
-        # Exporting nodes to json (visjs format)
-        result_nodes = []
-
-        for node in self._nodes.values():
-            if node.display and (self.show_unconnected or node.has_links()):
-                visjs_node = node.export_visjs()
-
-                if self.save_coords and visjs_node['physics']:
+                    visjs_node['x'] = int(cords[0])
+                    visjs_node['y'] = int(cords[1])
                     visjs_node['physics'] = False
-                result_nodes.append(visjs_node)
 
-        return {
-            'nodes': result_nodes,
-            'edges': self._edges
+        if topology.save_coords and visjs_node['physics']:
+            visjs_node['physics'] = False
+
+        result_nodes.append(visjs_node)
+
+    # Exporting edges to json (visjs format)
+    result_edges = []
+
+    for id, edge in enumerate(topology.edges()):
+        visjs_edge = {
+            'id': id,
+            'from': edge.origin.uid,
+            'to': edge.destination.uid,
+            'title': edge.title
         }
-    
-    def _browse_segments(self, segments):
-        origin = None
-        origin_endpoints = None
-        destination = None
-        destination_endpoints = None
-        sgt_link = None # TODO rename to segment_link, can be a circuit, ...
-        intermediates = {}
+        if edge.origin.is_circuit:
+            visjs_edge['title'] += f"<br/>Circuit provider: {edge.origin.netbox_object.provider}"
+            visjs_edge['dashes'] = True
+        elif edge.destination.is_circuit:
+            visjs_edge['title'] += f"<br/>Circuit provider: {edge.destination.netbox_object.provider}"
+            visjs_edge['dashes'] = True
 
-        results = self._find_nodes_and_links(segments)
+        if edge.has_intermediates():
+            visjs_edge['title'] += '<br/>Through ' + "/".join(map(str, edge.intermediates.values()))
 
-        for (node, endpoints, link) in results:
-            if not node.display:
-                if node.id not in intermediates:
-                    intermediates[node.id] = node
-            else:
-                if sgt_link == None:
-                    sgt_link = link
-
-                if origin == None:
-                    origin = node
-                    origin_endpoints = endpoints
-
-                elif destination == None:
-                    destination = node
-                    destination_endpoints = endpoints
-
-                if origin and destination:
-                    if origin_endpoints and len(origin_endpoints) > 0 and isinstance(origin_endpoints[0], CabledObjectModel):
-                        if origin_endpoints[0].id in self._endpoint_ids:
-                            #print("skip", origin_endpoints[0], "node", origin)
-                            continue
-                        else:
-                            self._endpoint_ids.append(origin_endpoints[0].id)
-
-                    if destination_endpoints and len(destination_endpoints) > 0 and isinstance(destination_endpoints[0], CabledObjectModel):
-                        if destination_endpoints[0].id in self._endpoint_ids:
-                            #print("skip", destination_endpoints[0], "node", destination)
-                            continue
-                        else:
-                            self._endpoint_ids.append(destination_endpoints[0].id)
-                    
-                    if sgt_link:
-                        origin.add_link(sgt_link)
-                        destination.add_link(sgt_link)
-    
-                    self._edges.append(self._create_edge(origin, origin_endpoints, destination, destination_endpoints, sgt_link, intermediates))
-
-                    # reset
-                    origin = None
-                    origin_endpoints = None
-                    destination = None
-                    destination_endpoints = None
-                    sgt_link = None 
-                    intermediates = {}
-
-    def _find_nodes_and_links(self, segments):
-        for segment in segments:
-            near_endpoints, links, far_endpoints = segment
-            #print(segment)
-
-            link = None
-            if links != None and len(links) > 0:
-                link = links[0]
-            
-            if isinstance(near_endpoints[0], CircuitTermination):
-                yield (self._get_or_create_circuit_node(near_endpoints[0].circuit), near_endpoints, link)
-            elif isinstance(near_endpoints[0], PowerFeed):
-                power_feed_node = self._get_or_create_power_feed_node(near_endpoints[0])
-                power_panel_node = self._get_or_create_power_panel_node(near_endpoints[0].power_panel)
-                yield (power_feed_node, [], link)
-                if power_panel_node:
-                    yield (power_feed_node, [], None)
-                    yield (power_panel_node, [], None)
-            elif isinstance(near_endpoints[0], CabledObjectModel):
-                # TODO : near_endpoints can be attached to different devices, so search for all nodes
-                yield (self._get_or_create_device_node(near_endpoints[0].device), near_endpoints, link)
-            elif isinstance(near_endpoints[0], ProviderNetwork):
-                yield (self._get_or_create_provider_network_node(near_endpoints[0]), near_endpoints,near_endpoints[0])
-
-            if isinstance(far_endpoints[0], CircuitTermination):
-                yield (self._get_or_create_circuit_node(far_endpoints[0].circuit), far_endpoints, link)
-            elif isinstance(far_endpoints[0], PowerFeed):
-                power_feed_node = self._get_or_create_power_feed_node(far_endpoints[0])
-                power_panel_node = self._get_or_create_power_panel_node(far_endpoints[0].power_panel)
-                yield (power_feed_node, [], link)
-                if power_panel_node:
-                    yield (power_feed_node, [], None)
-                    yield (power_panel_node, [], None)
-            elif isinstance(far_endpoints[0], CabledObjectModel):
-                # TODO : far_endpoints can be attached to different devices, so search for all nodes
-                yield (self._get_or_create_device_node(far_endpoints[0].device), far_endpoints, link)
-            elif isinstance(far_endpoints[0], ProviderNetwork):
-                yield (self._get_or_create_provider_network_node(far_endpoints[0]), far_endpoints, far_endpoints[0])            
-
-    def _create_edge(self, origin, origin_endpoints, destination, dest_endpoints, link, intermediates):
-        if len(origin_endpoints) > 0:
-            origin_endpoint_txt = f' [{",".join(map(str, origin_endpoints))}]'
-        else:
-            origin_endpoint_txt = ''
-
-        if len(dest_endpoints) > 0:
-            dest_endpoint_txt = f' [{",".join(map(str, dest_endpoints))}]'
-        else:
-            dest_endpoint_txt = ''
-
-        edge = {
-            'id': self._next_edge_id,
-            'from': origin.id,
-            'to': destination.id,
-            'title': f'Link between {origin}{origin_endpoint_txt} and {destination}{dest_endpoint_txt}'
-        }
-        edge = origin.add_edge_infos(edge)
-        edge = destination.add_edge_infos(edge)
-
-        if len(intermediates) > 0:
-            edge['title'] += '<br/>Through ' + "/".join(map(str, intermediates.values()))
+        if edge.has_link():
+            if isinstance(edge.link, WirelessLink):
+                visjs_edge['dashes'] = [5, 5, 3, 3]
+                if edge.link.ssid:
+                    visjs_edge['title'] += f'<br/>SSID: {edge.link.ssid}'
+            elif hasattr(edge.link, 'color') and edge.link.color != '':
+                visjs_edge['color'] = f'#{edge.link.color}'
         
-        if link:
-            if isinstance(link, WirelessLink):
-                edge['dashes'] = [5, 5, 3, 3]
-                if link.ssid:
-                    edge['title'] += f'<br/>SSID: {link.ssid}'
-            elif hasattr(link, 'color') and link.color != '':
-                edge['color'] = f'#{link.color}'
+        result_edges.append(visjs_edge)
 
-        self._next_edge_id += 1
-
-        return edge
-
-    def _get_or_create_device_node(self, device):
-        id = DeviceNode.make_id(device.id)
-
-        if id in self._nodes:
-            return self._nodes[id]
-        else:
-            node = DeviceNode(device)
-            node.display = device.id in self._device_ids
-            self._nodes[id] = node
-            return node
-
-    def _get_or_create_circuit_node(self, circuit):
-        id = CircuitNode.make_id(circuit.id)
-
-        if id in self._nodes:
-            return self._nodes[id]
-        else:
-            node = CircuitNode(circuit)
-            node.display = self.show_circuit
-            self._nodes[id] = node
-            return node
-
-    def _get_or_create_provider_network_node(self, provider_network):
-        id = ProviderNetworkNode.make_id(provider_network.id)
-
-        if id in self._nodes:
-            return self._nodes[id]
-        else:
-            node = ProviderNetworkNode(provider_network)
-            node.display = self.show_provider_network
-            self._nodes[id] = node
-            return node
-            
-    def _get_or_create_power_panel_node(self, power_panel):
-        id = PowerPanelNode.make_id(power_panel.id)
-
-        if id in self._nodes:
-            return self._nodes[id]
-        else:
-            node = PowerPanelNode(power_panel)
-            node.display = self.show_power
-            self._nodes[id] = node
-            return node
-
-    def _get_or_create_power_feed_node(self, power_feed):
-        id = PowerFeedNode.make_id(power_feed.id)
-
-        if id in self._nodes:
-            return self._nodes[id]
-        else:
-            node = PowerFeedNode(power_feed)
-            node.display = self.show_power
-            self._nodes[id] = node
-            return node
+    results = {
+        'nodes': result_nodes,
+        'edges': result_edges
+    }
+    #import json
+    #print(json.dumps(results, indent=2))
+    return results
