@@ -4,7 +4,7 @@ from typing import DefaultDict, Dict, Optional, Union
 import time
 
 from utilities.htmx import is_htmx
-from circuits.models import Circuit, CircuitTermination, ProviderNetwork
+from circuits.models import Circuit, CircuitTermination
 from dcim.models import (
     Cable,
     CableTermination,
