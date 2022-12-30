@@ -187,10 +187,10 @@ class Edge:
 # Could inherit from django.model to store it in netbox database
 class Topology:
 
-    def __init__(self, show_circuit = True, show_power = False, show_unconnected = True, show_provider_network = True, save_coords = True):
+    def __init__(self, show_circuit = True, show_power = False, hide_unconnected = False, show_provider_network = True, save_coords = True):
         self.show_circuit = show_circuit
         self.show_power = show_power
-        self.show_unconnected = show_unconnected
+        self.hide_unconnected = hide_unconnected
         self.show_provider_network = show_provider_network
         self.save_coords = save_coords
 
@@ -237,7 +237,7 @@ class Topology:
             self._browse_segments([segment])
 
         # Create requested devices not discovered when browsing
-        if self.show_unconnected:
+        if not self.hide_unconnected:
             for device in queryset:
                 if BaseNode.get_uid(device) not in self._nodes:
                     device_node = self._get_or_create_node(device)
@@ -257,7 +257,7 @@ class Topology:
         
         # remove unwanted nodes
         for uid,node in list(self._nodes.items()):
-            if not (node.display or (self.show_unconnected and not node.has_edges())):
+            if not (node.display or (not self.hide_unconnected and not node.has_edges())):
                 self._nodes.pop(uid)
 
     def _browse_segments(self, segments):

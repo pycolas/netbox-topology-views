@@ -122,7 +122,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = True,
-            show_unconnected = True,
+            hide_unconnected = False,
             show_provider_network = True
         )
         topology.parse_queryset(queryset)
@@ -154,7 +154,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = True,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = True
         )
         topology.parse_queryset(queryset)
@@ -182,7 +182,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = True,
-            show_unconnected = True,
+            hide_unconnected = False,
             show_provider_network = True
         )
         topology.parse_queryset(queryset)
@@ -204,7 +204,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = False,
             show_power = False,
-            show_unconnected = True,
+            hide_unconnected = False,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -229,7 +229,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = False,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = True
         )
         topology.parse_queryset(queryset)
@@ -254,7 +254,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = False,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -279,7 +279,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = False,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -303,7 +303,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -329,7 +329,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = False,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -355,7 +355,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = False,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -381,7 +381,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -407,7 +407,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -429,7 +429,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = True
         )
         topology.parse_queryset(queryset)
@@ -459,7 +459,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = True
         )
         topology.parse_queryset(queryset)
@@ -482,7 +482,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = False,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = True
         )
         topology.parse_queryset(queryset)
@@ -506,7 +506,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = True,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
@@ -529,7 +529,7 @@ class TopologyTestCase(TestCase):
         topology = Topology(
             show_circuit = False,
             show_power = False,
-            show_unconnected = False,
+            hide_unconnected = True,
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
