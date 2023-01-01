@@ -6,7 +6,8 @@ from dcim.models import *
 from wireless.models import WirelessLink
 from extras.models import Tag
 
-from ..models import BaseNode, Topology
+from ..models import *
+from ..views import *
 
 HIDE_UNCONNECTED_NO = False
 HIDE_UNCONNECTED_YES = True
@@ -98,14 +99,80 @@ class TopologyTestCase(TestCase):
         cls.pdu1.tags.add(cls.tag_topo1)
         cls.pdu2.tags.add(cls.tag_topo1)
 
+    # assert that only specific netbox models are in topology AND visible (node.display is True)
+    def assertNetboxModelsVisibleInTopology(self, netbox_models, topology):
+        nodes_ids = sorted(map(BaseNode.get_uid, netbox_models))
+        topology_nodes = sorted(map(lambda n : n.uid, topology.get_visible_nodes()))
+        self.assertListEqual(nodes_ids, topology_nodes)
+
+    # assert that only specific netbox models are in topology, visible or not (node.display is True or False)
     def assertNetboxModelsInTopology(self, netbox_models, topology):
         nodes_ids = sorted(map(BaseNode.get_uid, netbox_models))
+        topology_nodes = sorted(map(lambda n : n.uid, topology.get_all_nodes()))
+        self.assertListEqual(nodes_ids, topology_nodes)
 
-        topology_nodes = sorted(map(lambda n : n.uid, topology.nodes()))
+    def test_get_or_create_node(self):
+        topology = Topology(hide_unconnected = False)
+        switch1_node = topology._get_or_create_node(self.switch1)
+        switch1_node_bis = topology._get_or_create_node(self.switch1)
 
-        self.assertEqual(nodes_ids, topology_nodes)
+        self.assertIsNotNone(switch1_node)
+        self.assertFalse(switch1_node.display)
+        self.assertEqual(switch1_node.uid, switch1_node_bis.uid)
+        self.assertIsNone(topology._get_or_create_node(None))
+        self.assertEqual(1, len(topology.get_all_nodes()))
+        self.assertEqual(0, len(topology.get_visible_nodes()))
+        self.assertEqual(switch1_node.uid, topology.get_all_nodes()[0].uid)
 
-    def test_nodes_100(self):
+    def test_query_set(self):
+        device_qs = Device.objects.filter(id__in=[self.switch1.id, self.patch_panel1.id])
+        topology = Topology()
+        topology.parse_queryset(device_qs)
+
+        self.assertListEqual(sorted([self.switch1.id, self.patch_panel1.id]), sorted(topology._device_ids))
+
+    def test_nodes_visibility_1(self):
+        device_qs = Device.objects.filter(id__in=[self.switch1.id, self.patch_panel1.id, self.patch_panel2.id])
+        topology = Topology(hide_unconnected = True)
+        topology.parse_queryset(device_qs)
+
+        self.assertNetboxModelsInTopology([self.switch1, self.patch_panel1, self.patch_panel2], topology) 
+        self.assertNetboxModelsVisibleInTopology([self.patch_panel1, self.patch_panel2], topology)
+
+        switch1_node = topology._get_or_create_node(self.switch1)
+        switch2_node = topology._get_or_create_node(self.switch2)
+
+        self.assertFalse(switch1_node.display)
+        self.assertFalse(switch2_node.display)
+
+        switch1_node.add_edge(Edge("test", switch1_node, switch2_node))
+        topology._update_nodes_visibility()
+
+        self.assertTrue(switch1_node.display)
+        self.assertFalse(switch2_node.display)
+
+    def test_nodes_visibility_2(self):
+        device_qs = Device.objects.filter(id=self.switch1.id)
+        topology = Topology(hide_unconnected = False)
+        topology.parse_queryset(device_qs)
+
+        self.assertEqual(1, len(topology.get_all_nodes()))
+        self.assertEqual([self.switch1.id], topology._device_ids)
+
+        switch1_node = topology._get_or_create_node(self.switch1)
+        switch2_node = topology._get_or_create_node(self.switch2)
+
+        self.assertTrue(switch1_node.display)
+        self.assertFalse(switch2_node.display)
+
+        topology.hide_unconnected = True
+        switch2_node.add_edge(Edge("test", switch1_node, switch2_node))
+        topology._update_nodes_visibility()
+
+        self.assertFalse(switch1_node.display)
+        self.assertFalse(switch2_node.display)
+
+    def test_nodes(self):
         # Topology :
         #   [switch1] [pdu1] [powerfeed1] [powerpanel1]
         #   [switch2] [pdu2] [powerfeed2]
@@ -130,18 +197,18 @@ class TopologyTestCase(TestCase):
         all_topo1_nodes = [
             self.switch1,
             self.switch2,
-            #self.powerfeed1,
-            #self.powerfeed2,
+            self.powerfeed1,
+            self.powerfeed2,
             self.pdu1,
             self.pdu2,
-            #self.powerpanel1,
+            self.powerpanel1,
             self.patch_panel1,
             self.patch_panel2
         ]
-        self.assertNetboxModelsInTopology(all_topo1_nodes, topology)
+        self.assertNetboxModelsVisibleInTopology(all_topo1_nodes, topology)
         self.assertEqual(len(topology.edges()), 0)
 
-    def test_hide_unconnected_100(self):
+    def test_hide_unconnected(self):
         # Topology :
         #   [switch1] [pdu1] [powerfeed1] [powerpanel1]
         #   [switch2] [pdu2] [powerfeed2]
@@ -159,10 +226,10 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.patch_panel1, self.patch_panel2], topology)
+        self.assertNetboxModelsVisibleInTopology([self.patch_panel1, self.patch_panel2], topology)
         self.assertEqual(len(topology.edges()), 1)
 
-    def test_power_connections_100(self):
+    def test_power_connections(self):
         # Topology :
         #   [switch1|psu0] -- [plug1|pdu1|power_in] -- [powerfeed1] -- [powerpanel1]
         #                                                                   /
@@ -187,10 +254,10 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2, self.powerfeed1, self.powerfeed2, self.pdu1, self.pdu2, self.powerpanel1], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2, self.powerfeed1, self.powerfeed2, self.pdu1, self.pdu2, self.powerpanel1], topology)
         self.assertEqual(len(topology.edges()), 6)
 
-    def test_switchs_directly_connected_101(self):
+    def test_switchs_directly_connected(self):
         # Topology :
         #   [switch1|if1] -- [if1|switch2]
         #
@@ -209,11 +276,11 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2], topology)
         self.assertEqual(len(topology.edges()), 1)
 
 
-    def test_switchs_connected_through_patch_panels_102(self):
+    def test_switchs_connected_through_patch_panels_1(self):
         # Display patch-panels
         #
         # Topology :
@@ -234,11 +301,11 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2, self.patch_panel1, self.patch_panel2], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2, self.patch_panel1, self.patch_panel2], topology)
         self.assertEqual(len(topology.edges()), 3)
 
 
-    def test_switchs_connected_through_patch_panels_103(self):
+    def test_switchs_connected_through_patch_panels_2(self):
         # Hide patch-panels
         #
         # Topology :
@@ -259,11 +326,11 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2], topology)
         self.assertEqual(len(topology.edges()), 1)
 
 
-    def test_switchs_connected_through_circuit_104(self):
+    def test_switchs_connected_through_circuit_1(self):
         # Hide circuit
         #
         # Topology :
@@ -271,7 +338,6 @@ class TopologyTestCase(TestCase):
         #
         # Expected result :
         #   [switch1|if1] -- [if1|switch2]
-        #
         Cable(a_terminations=[self.switch1_if1],b_terminations=[self.circuit_termination_1_a]).save()
         Cable(a_terminations=[self.switch2_if1],b_terminations=[self.circuit_termination_1_z]).save()
 
@@ -284,10 +350,10 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2], topology)
         self.assertEqual(len(topology.edges()), 1)
 
-    def test_switchs_connected_through_circuit_105(self):
+    def test_switchs_connected_through_circuit_2(self):
         # Show circuit
         #
         # Topology :
@@ -308,11 +374,11 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2, self.circuit1], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2, self.circuit1], topology)
         self.assertEqual(len(topology.edges()), 2)
      
 
-    def test_switchs_connected_through_circuit_and_passive_dev_105(self):
+    def test_switchs_connected_through_circuit_and_passive_dev_1(self):
         # Display intermediate patch-panels and hide circuit
         #
         # Topology :
@@ -334,11 +400,11 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2, self.patch_panel1, self.patch_panel2], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2, self.patch_panel1, self.patch_panel2], topology)
         self.assertEqual(len(topology.edges()), 3)
     
 
-    def test_switchs_connected_through_circuit_and_passive_dev_106(self):
+    def test_switchs_connected_through_circuit_and_passive_dev_2(self):
         # Hide intermediate patch-panels and circuit
         #
         # Topology :
@@ -360,11 +426,11 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2], topology)
         self.assertEqual(len(topology.edges()), 1)
 
 
-    def test_switchs_connected_through_circuit_and_passive_dev_107(self):
+    def test_switchs_connected_through_circuit_and_passive_dev_3(self):
         # Hide intermediate patch-panels and show circuit
         #
         # Topology :
@@ -386,11 +452,11 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2, self.circuit1], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2, self.circuit1], topology)
         self.assertEqual(len(topology.edges()), 2)
 
 
-    def test_switchs_connected_through_circuit_and_passive_dev_108(self):
+    def test_switchs_connected_through_circuit_and_passive_dev_4(self):
         # Show intermediate patch-panels and show circuit
         #
         # Topology :
@@ -412,11 +478,11 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2, self.patch_panel1, self.patch_panel2, self.circuit1], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2, self.patch_panel1, self.patch_panel2, self.circuit1], topology)
         self.assertEqual(len(topology.edges()), 4)
 
 
-    def test_switch_connected_to_provider_network_109(self):
+    def test_switch_connected_to_provider_network(self):
         # Topology :
         #   [switch1|if1] -- [A|circuit2|Z] [provider_network]
         #
@@ -434,10 +500,10 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.circuit2, self.provider_network1], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.circuit2, self.provider_network1], topology)
         self.assertEqual(len(topology.edges()), 2)
 
-    def test_switchs_connected_to_same_provider_network_110(self):
+    def test_switchs_connected_to_same_provider_network(self):
         # Topology :
         #   [switch1|if1] -- [A|circuit2|Z] -- [provider_network1]
         #                                               /
@@ -464,10 +530,10 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2, self.circuit2, circuit3, self.provider_network1], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2, self.circuit2, circuit3, self.provider_network1], topology)
         self.assertEqual(len(topology.edges()), 4)
 
-    def test_switch_connected_to_provider_network_111(self):
+    def test_switch_connected_to_provider_network2(self):
         # Hide circuit and show provider network
         # 
         # Topology :
@@ -487,10 +553,10 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, self.provider_network1], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.provider_network1], topology)
         self.assertEqual(len(topology.edges()), 1)
 
-    def test_switch_connected_to_incomplete_circuit_112(self):
+    def test_switch_connected_to_incomplete_circuit(self):
         # Topology :
         #   [switch1|if1] -- [A|circuit3|Z]
         #
@@ -511,10 +577,10 @@ class TopologyTestCase(TestCase):
         )
         topology.parse_queryset(queryset)
 
-        self.assertNetboxModelsInTopology([self.switch1, circuit3], topology)
+        self.assertNetboxModelsVisibleInTopology([self.switch1, circuit3], topology)
         self.assertEqual(len(topology.edges()), 1)
 
-    def test_switchs_connected_through_wirelesslink_112(self):
+    def test_switchs_connected_through_wirelesslink(self):
         # Topology :
         #   [switch1|if2] -- [wirelesslink] -- [if2|switch1]
         #
@@ -533,6 +599,6 @@ class TopologyTestCase(TestCase):
             show_provider_network = False
         )
         topology.parse_queryset(queryset)
-        
-        self.assertNetboxModelsInTopology([self.switch1, self.switch2], topology)
+
+        self.assertNetboxModelsVisibleInTopology([self.switch1, self.switch2], topology)
         self.assertEqual(len(topology.edges()), 1)

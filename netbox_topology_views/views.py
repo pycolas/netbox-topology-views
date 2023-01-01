@@ -646,16 +646,29 @@ class TopologyHomeView(PermissionRequiredMixin, View):
                         show_wireless,
                     )
             else:
-                topo_data = get_topology_data(
-                    self.queryset,
-                    hide_unconnected,
-                    save_coords,
-                    show_cables,
-                    show_circuit,
-                    show_logical_connections,
-                    show_power,
-                    show_wireless,
-                )
+                if 'topo' in request.GET:
+                    topology = get_topology_data2(
+                        self.queryset,
+                        hide_unconnected,
+                        save_coords,
+                        show_cables,
+                        show_circuit,
+                        show_logical_connections,
+                        show_power,
+                        show_wireless,
+                    )
+                    topo_data = topology_to_visjs(topology)
+                else:
+                    topo_data = get_topology_data(
+                        self.queryset,
+                        hide_unconnected,
+                        save_coords,
+                        show_cables,
+                        show_circuit,
+                        show_logical_connections,
+                        show_power,
+                        show_wireless,
+                    )
         else:
             preselected_device_roles = settings.PLUGINS_CONFIG["netbox_topology_views"][
                 "preselected_device_roles"
@@ -769,11 +782,35 @@ class TopologyImagesView(PermissionRequiredMixin, View):
         )
 
 
-def topology_to_visjs(cls, topology: Topology):
-    # Exporting nodes to json (visjs format)
-    result_nodes = []
 
-    for node in topology.nodes().values():
+def get_topology_data2(
+    queryset: QuerySet,
+    hide_unconnected: bool,
+    save_coords: bool,
+    show_cables: bool,
+    show_circuit: bool,
+    show_logical_connections: bool,
+    show_power: bool,
+    show_wireless: bool,
+):
+    if not queryset:
+        return None
+    
+    topology = Topology(
+        show_circuit = show_circuit,
+        show_power = show_power,
+        hide_unconnected = hide_unconnected,
+        show_provider_network = show_circuit
+    )
+    topology.parse_queryset(queryset)
+
+    return topology
+
+def topology_to_visjs(topology: Topology):
+    # Exporting nodes to json (visjs format)
+    visjs_nodes = []
+
+    for node in topology.get_visible_nodes():
         visjs_node = {
             'id': node.uid,
             'label': str(node),
@@ -795,10 +832,10 @@ def topology_to_visjs(cls, topology: Topology):
         if topology.save_coords and visjs_node['physics']:
             visjs_node['physics'] = False
 
-        result_nodes.append(visjs_node)
+        visjs_nodes.append(visjs_node)
 
     # Exporting edges to json (visjs format)
-    result_edges = []
+    visjs_edges = []
 
     for id, edge in enumerate(topology.edges()):
         visjs_edge = {
@@ -825,12 +862,12 @@ def topology_to_visjs(cls, topology: Topology):
             elif hasattr(edge.link, 'color') and edge.link.color != '':
                 visjs_edge['color'] = f'#{edge.link.color}'
         
-        result_edges.append(visjs_edge)
+        visjs_edges.append(visjs_edge)
 
     results = {
-        'nodes': result_nodes,
-        'edges': result_edges
+        'nodes': visjs_nodes,
+        'edges': visjs_edges
     }
-    #import json
-    #print(json.dumps(results, indent=2))
+    import json
+    print(json.dumps(results, indent=2))
     return results
