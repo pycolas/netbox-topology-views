@@ -137,8 +137,8 @@ class BaseNode:
 
         self.is_device = isinstance(netbox_object, Device)
         self.is_circuit = isinstance(netbox_object, Circuit)
-        self.is_power_panel = isinstance(netbox_object, Circuit)
-        self.is_power_feed = isinstance(netbox_object, Circuit)
+        self.is_power_panel = isinstance(netbox_object, PowerPanel)
+        self.is_power_feed = isinstance(netbox_object, PowerFeed)
         self.is_provider_network = isinstance(netbox_object, ProviderNetwork)
 
         if self.is_circuit:
